@@ -9,10 +9,7 @@ from datetime import datetime
 import json
 import base64
 
-from agents.competitor_discovery_agent import CompetitorDiscoveryAgent
-from agents.feature_matrix_builder_agent import FeatureMatrixBuilderAgent
-from agents.differentiation_strategist_agent import DifferentiationStrategistAgent
-from agents.visual_gap_mapper_agent import VisualGapMapperAgent
+from market_analysis_graph import run_market_analysis
 
 # Load environment variables
 load_dotenv()
@@ -96,12 +93,6 @@ def main():
         st.error("Please check your API keys in the .env file")
         return
     
-    # Initialize agents
-    competitor_discovery = CompetitorDiscoveryAgent(search, llm, vector_db)
-    feature_matrix_builder = FeatureMatrixBuilderAgent(llm)
-    differentiation_strategist = DifferentiationStrategistAgent(llm)
-    visual_gap_mapper = VisualGapMapperAgent()
-    
     # Startup Idea Input
     st.header("💡 Startup Idea")
     startup_idea = st.text_area(
@@ -116,99 +107,94 @@ def main():
             
         with st.spinner("Analyzing market and competitors..."):
             try:
-                # Discover competitors
-                st.subheader("🔍 Discovering Competitors")
-                competitors = competitor_discovery.discover_competitors(startup_idea)
+                # Run the market analysis workflow
+                final_state = run_market_analysis(startup_idea, search, llm, vector_db)
                 
-                if competitors:
-                    # Build feature matrix
-                    st.subheader("📊 Building Feature Matrix")
-                    feature_matrix = feature_matrix_builder.build_feature_matrix(competitors)
+                if final_state.get("error"):
+                    st.error(final_state["error"])
+                    return
+                
+                # Display results
+                st.header("📊 Analysis Results")
+                
+                # Display competitors
+                st.subheader("🏢 Competitors")
+                for comp in final_state["competitors"]:
+                    with st.expander(f"{comp['name']}"):
+                        st.markdown(f"**Website:** {comp['website']}")
+                        st.markdown(f"**Description:** {comp['description']}")
+                        st.markdown("**Features:**")
+                        for feature in comp['features']:
+                            st.markdown(f"- {feature}")
+                        st.markdown(f"**Pricing Model:** {comp['pricing_model']}")
+                        st.markdown(f"**Target Audience:** {comp['target_audience']}")
+                        st.markdown(f"**USP:** {comp['usp']}")
+                
+                # Display differentiation strategy
+                st.subheader("💡 Differentiation Strategy")
+                if final_state["strategy"]:
+                    col1, col2 = st.columns(2)
                     
-                    # Generate differentiation strategy
-                    st.subheader("🎯 Generating Differentiation Strategy")
-                    strategy = differentiation_strategist.generate_strategy(startup_idea, competitors, feature_matrix)
-                    
-                    # Generate visualizations
-                    st.subheader("📈 Creating Visualizations")
-                    visualizations = visual_gap_mapper.generate_visualizations(competitors, feature_matrix, strategy)
-                    
-                    # Display results
-                    st.header("📊 Analysis Results")
-                    
-                    # Display competitors
-                    st.subheader("🏢 Competitors")
-                    for comp in competitors:
-                        with st.expander(f"{comp['name']}"):
-                            st.markdown(f"**Website:** {comp['website']}")
-                            st.markdown(f"**Description:** {comp['description']}")
-                            st.markdown("**Features:**")
-                            for feature in comp['features']:
-                                st.markdown(f"- {feature}")
-                            st.markdown(f"**Pricing Model:** {comp['pricing_model']}")
-                            st.markdown(f"**Target Audience:** {comp['target_audience']}")
-                            st.markdown(f"**USP:** {comp['usp']}")
-                    
-                    # Display differentiation strategy
-                    st.subheader("💡 Differentiation Strategy")
-                    if strategy:
-                        col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("#### Market Opportunities")
+                        st.markdown("##### Whitespace Opportunities")
+                        for opp in final_state["strategy"].get("whitespace_opportunities", []):
+                            st.markdown(f"- {opp['description']} ({opp['type']})")
                         
-                        with col1:
-                            st.markdown("#### Market Opportunities")
-                            st.markdown("##### Whitespace Opportunities")
-                            for opp in strategy.get("whitespace_opportunities", []):
-                                st.markdown(f"- {opp['description']} ({opp['type']})")
-                            
-                            st.markdown("##### Innovation Areas")
-                            for opp in strategy.get("innovation_areas", []):
-                                st.markdown(f"- {opp['opportunity']} ({opp['category']})")
+                        st.markdown("##### Innovation Areas")
+                        for opp in final_state["strategy"].get("innovation_areas", []):
+                            st.markdown(f"- {opp['opportunity']} ({opp['category']})")
+                    
+                    with col2:
+                        st.markdown("#### Strategic Positioning")
+                        positioning = final_state["strategy"].get("positioning_strategy", {})
+                        st.markdown(f"**Market Position:** {positioning.get('market_position', 'N/A')}")
+                        st.markdown(f"**Value Proposition:** {positioning.get('value_proposition', 'N/A')}")
+                        st.markdown(f"**Target Audience:** {positioning.get('target_audience', 'N/A')}")
+                        st.markdown(f"**Brand Positioning:** {positioning.get('brand_positioning', 'N/A')}")
                         
-                        with col2:
-                            st.markdown("#### Strategic Positioning")
-                            positioning = strategy.get("positioning_strategy", {})
-                            st.markdown(f"**Market Position:** {positioning.get('market_position', 'N/A')}")
-                            st.markdown(f"**Value Proposition:** {positioning.get('value_proposition', 'N/A')}")
-                            st.markdown(f"**Target Audience:** {positioning.get('target_audience', 'N/A')}")
-                            st.markdown(f"**Brand Positioning:** {positioning.get('brand_positioning', 'N/A')}")
-                            
-                            st.markdown("##### Key Differentiators")
-                            for diff in positioning.get("key_differentiators", []):
-                                st.markdown(f"- {diff}")
-                    
-                    # Display visualizations
-                    st.subheader("📈 Market Analysis Visualizations")
-                    
-                    # Feature Gap Map
-                    st.markdown("##### Feature Gap Analysis")
-                    feature_gap_map = visualizations.get("feature_gap_map", {})
-                    if feature_gap_map:
-                        st.write(feature_gap_map)
-                    
-                    # Market Opportunity Map
-                    st.markdown("##### Market Opportunity Map")
-                    opportunity_map = visualizations.get("market_opportunity_map", {})
-                    if opportunity_map:
-                        st.write(opportunity_map)
-                    
-                    # Competitive Landscape
-                    st.markdown("##### Competitive Landscape")
-                    landscape = visualizations.get("competitive_landscape", {})
-                    if landscape:
-                        st.write(landscape)
-                    
-                    # Innovation Radar
-                    st.markdown("##### Innovation Radar")
-                    radar = visualizations.get("innovation_radar", {})
-                    if radar:
-                        st.write(radar)
-                    
-                    # Export functionality
-                    st.header("📥 Export Analysis")
-                    export_data = create_export_data(competitors, strategy, feature_matrix, visualizations)
-                    export_filename = f"market_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    st.markdown(get_download_link(export_data, export_filename), unsafe_allow_html=True)
-                    
+                        st.markdown("##### Key Differentiators")
+                        for diff in positioning.get("key_differentiators", []):
+                            st.markdown(f"- {diff}")
+                
+                # Display visualizations
+                st.subheader("📈 Market Analysis Visualizations")
+                
+                # Feature Gap Map
+                st.markdown("##### Feature Gap Analysis")
+                feature_gap_map = final_state["visualizations"].get("feature_gap_map", {})
+                if feature_gap_map:
+                    st.write(feature_gap_map)
+                
+                # Market Opportunity Map
+                st.markdown("##### Market Opportunity Map")
+                opportunity_map = final_state["visualizations"].get("market_opportunity_map", {})
+                if opportunity_map:
+                    st.write(opportunity_map)
+                
+                # Competitive Landscape
+                st.markdown("##### Competitive Landscape")
+                landscape = final_state["visualizations"].get("competitive_landscape", {})
+                if landscape:
+                    st.write(landscape)
+                
+                # Innovation Radar
+                st.markdown("##### Innovation Radar")
+                radar = final_state["visualizations"].get("innovation_radar", {})
+                if radar:
+                    st.write(radar)
+                
+                # Export functionality
+                st.header("📥 Export Analysis")
+                export_data = create_export_data(
+                    final_state["competitors"],
+                    final_state["strategy"],
+                    final_state["feature_matrix"],
+                    final_state["visualizations"]
+                )
+                export_filename = f"market_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                st.markdown(get_download_link(export_data, export_filename), unsafe_allow_html=True)
+                
             except Exception as e:
                 st.error(f"An error occurred: {str(e)}")
 
