@@ -8,6 +8,7 @@ from langchain_chroma import Chroma
 from datetime import datetime
 import json
 import base64
+from typing import List, Dict
 
 from market_analysis_graph import run_market_analysis
 
@@ -69,6 +70,17 @@ def get_download_link(data: dict, filename: str) -> str:
     b64 = base64.b64encode(json_str.encode()).decode()
     return f'<a href="data:file/json;base64,{b64}" download="{filename}">Download Analysis</a>'
 
+def filter_dicts(obj):
+    if isinstance(obj, list):
+        # Recursively filter each item in the list, keep only dicts and lists
+        return [filter_dicts(item) for item in obj if isinstance(item, (dict, list))]
+    elif isinstance(obj, dict):
+        # Recursively filter each value in the dict
+        return {k: filter_dicts(v) for k, v in obj.items()}
+    else:
+        # Remove any other type (including StructuredTool)
+        return None
+
 def main():
     st.set_page_config(
         page_title="Competitor Differentiation Mapper",
@@ -109,6 +121,13 @@ def main():
             try:
                 # Run the market analysis workflow
                 final_state = run_market_analysis(startup_idea, search, llm, vector_db)
+                st.write("DEBUG RAW final_state:", final_state)
+                
+                # Clean all outputs to remove non-dict objects
+                final_state["competitors"] = filter_dicts(final_state.get("competitors", []))
+                final_state["strategy"] = filter_dicts(final_state.get("strategy", {}))
+                final_state["visualizations"] = filter_dicts(final_state.get("visualizations", {}))
+                st.write("DEBUG final_state after filtering:", final_state)
                 
                 if final_state.get("error"):
                     st.error(final_state["error"])
@@ -119,7 +138,10 @@ def main():
                 
                 # Display competitors
                 st.subheader("🏢 Competitors")
-                for comp in final_state["competitors"]:
+                # Filter out non-dict objects and debug
+                competitors = [comp for comp in final_state["competitors"] if isinstance(comp, dict)]
+                st.write("DEBUG competitors:", final_state["competitors"])
+                for comp in competitors:
                     with st.expander(f"{comp['name']}"):
                         st.markdown(f"**Website:** {comp['website']}")
                         st.markdown(f"**Description:** {comp['description']}")
@@ -138,51 +160,79 @@ def main():
                     with col1:
                         st.markdown("#### Market Opportunities")
                         st.markdown("##### Whitespace Opportunities")
-                        for opp in final_state["strategy"].get("whitespace_opportunities", []):
-                            st.markdown(f"- {opp['description']} ({opp['type']})")
+                        try:
+                            for opp in final_state["strategy"].get("whitespace_opportunities", []):
+                                st.markdown(f"- {opp['description']} ({opp['type']})")
+                        except Exception as e:
+                            st.error(f"Error in whitespace_opportunities: {e}")
+                            st.write("DEBUG whitespace_opportunities:", final_state["strategy"].get("whitespace_opportunities", []))
                         
                         st.markdown("##### Innovation Areas")
-                        for opp in final_state["strategy"].get("innovation_areas", []):
-                            st.markdown(f"- {opp['opportunity']} ({opp['category']})")
+                        try:
+                            for opp in final_state["strategy"].get("innovation_areas", []):
+                                st.markdown(f"- {opp['opportunity']} ({opp['category']})")
+                        except Exception as e:
+                            st.error(f"Error in innovation_areas: {e}")
+                            st.write("DEBUG innovation_areas:", final_state["strategy"].get("innovation_areas", []))
                     
                     with col2:
                         st.markdown("#### Strategic Positioning")
-                        positioning = final_state["strategy"].get("positioning_strategy", {})
-                        st.markdown(f"**Market Position:** {positioning.get('market_position', 'N/A')}")
-                        st.markdown(f"**Value Proposition:** {positioning.get('value_proposition', 'N/A')}")
-                        st.markdown(f"**Target Audience:** {positioning.get('target_audience', 'N/A')}")
-                        st.markdown(f"**Brand Positioning:** {positioning.get('brand_positioning', 'N/A')}")
-                        
-                        st.markdown("##### Key Differentiators")
-                        for diff in positioning.get("key_differentiators", []):
-                            st.markdown(f"- {diff}")
+                        try:
+                            positioning = final_state["strategy"].get("positioning_strategy", {})
+                            st.markdown(f"**Market Position:** {positioning.get('market_position', 'N/A')}")
+                            st.markdown(f"**Value Proposition:** {positioning.get('value_proposition', 'N/A')}")
+                            st.markdown(f"**Target Audience:** {positioning.get('target_audience', 'N/A')}")
+                            st.markdown(f"**Brand Positioning:** {positioning.get('brand_positioning', 'N/A')}")
+                            
+                            st.markdown("##### Key Differentiators")
+                            for diff in positioning.get("key_differentiators", []):
+                                st.markdown(f"- {diff}")
+                        except Exception as e:
+                            st.error(f"Error in positioning_strategy: {e}")
+                            st.write("DEBUG positioning_strategy:", final_state["strategy"].get("positioning_strategy", {}))
                 
                 # Display visualizations
                 st.subheader("📈 Market Analysis Visualizations")
                 
                 # Feature Gap Map
                 st.markdown("##### Feature Gap Analysis")
-                feature_gap_map = final_state["visualizations"].get("feature_gap_map", {})
-                if feature_gap_map:
-                    st.write(feature_gap_map)
+                try:
+                    feature_gap_map = final_state["visualizations"].get("feature_gap_map", {})
+                    if feature_gap_map:
+                        st.write(feature_gap_map)
+                except Exception as e:
+                    st.error(f"Error in feature_gap_map: {e}")
+                    st.write("DEBUG feature_gap_map:", final_state["visualizations"].get("feature_gap_map", {}))
                 
                 # Market Opportunity Map
                 st.markdown("##### Market Opportunity Map")
-                opportunity_map = final_state["visualizations"].get("market_opportunity_map", {})
-                if opportunity_map:
-                    st.write(opportunity_map)
+                try:
+                    opportunity_map = final_state["visualizations"].get("market_opportunity_map", {})
+                    if opportunity_map:
+                        st.write(opportunity_map)
+                except Exception as e:
+                    st.error(f"Error in market_opportunity_map: {e}")
+                    st.write("DEBUG market_opportunity_map:", final_state["visualizations"].get("market_opportunity_map", {}))
                 
                 # Competitive Landscape
                 st.markdown("##### Competitive Landscape")
-                landscape = final_state["visualizations"].get("competitive_landscape", {})
-                if landscape:
-                    st.write(landscape)
+                try:
+                    landscape = final_state["visualizations"].get("competitive_landscape", {})
+                    if landscape:
+                        st.write(landscape)
+                except Exception as e:
+                    st.error(f"Error in competitive_landscape: {e}")
+                    st.write("DEBUG competitive_landscape:", final_state["visualizations"].get("competitive_landscape", {}))
                 
                 # Innovation Radar
                 st.markdown("##### Innovation Radar")
-                radar = final_state["visualizations"].get("innovation_radar", {})
-                if radar:
-                    st.write(radar)
+                try:
+                    radar = final_state["visualizations"].get("innovation_radar", {})
+                    if radar:
+                        st.write(radar)
+                except Exception as e:
+                    st.error(f"Error in innovation_radar: {e}")
+                    st.write("DEBUG innovation_radar:", final_state["visualizations"].get("innovation_radar", {}))
                 
                 # Export functionality
                 st.header("📥 Export Analysis")
@@ -197,6 +247,9 @@ def main():
                 
             except Exception as e:
                 st.error(f"An error occurred: {str(e)}")
+                import traceback
+                st.write(traceback.format_exc())
+                return
 
 if __name__ == "__main__":
     main() 

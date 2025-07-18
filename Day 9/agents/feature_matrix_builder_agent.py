@@ -2,117 +2,131 @@ import streamlit as st
 from typing import List, Dict
 import json
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.tools import tool
+from langchain.agents import initialize_agent, AgentType
+from typing_extensions import TypedDict
+
+# --- Tool Definitions ---
+FEATURE_CATEGORIES = [
+    "Core Features",
+    "User Experience",
+    "Technical Capabilities",
+    "Integration Features",
+    "Security & Privacy",
+    "Analytics & Reporting",
+    "Mobile & Remote Access"
+]
+
+class CategorizeFeaturesInput(TypedDict):
+    features: list
+
+@tool("categorize_features")
+def categorize_features_tool(input: CategorizeFeaturesInput, llm=None) -> dict:
+    """Categorizes features into predefined categories using an LLM."""
+    features = input["features"]
+    categorized = {category: [] for category in FEATURE_CATEGORIES}
+    prompt = f"""Categorize the following features into these categories: {', '.join(FEATURE_CATEGORIES)}\n\nFeatures to categorize:\n{json.dumps(features, indent=2)}\n\nReturn the response in JSON format with categories as keys and lists of features as values."""
+    try:
+        response = llm.invoke(prompt)
+        response_text = response.content
+        start_idx = response_text.find('{')
+        end_idx = response_text.rfind('}') + 1
+        if start_idx != -1 and end_idx != -1:
+            categories = json.loads(response_text[start_idx:end_idx])
+            for category, feats in categories.items():
+                if category in categorized:
+                    categorized[category] = feats
+    except Exception as e:
+        st.warning(f"Error categorizing features: {str(e)}")
+    return categorized
+
+class GenerateFeatureComparisonInput(TypedDict):
+    competitors: list
+    categorized_features: dict
+
+@tool("generate_feature_comparison")
+def generate_feature_comparison_tool(input: GenerateFeatureComparisonInput, llm=None) -> dict:
+    """Generates a detailed feature comparison matrix for competitors and categorized features."""
+    competitors = input["competitors"]
+    categorized_features = input["categorized_features"]
+    comparison = {
+        "by_category": {},
+        "by_competitor": {}
+    }
+    try:
+        # Build comparison by category
+        for category, features in categorized_features.items():
+            comparison["by_category"][category] = {}
+            for feature in features:
+                comparison["by_category"][category][feature] = []
+                for comp in competitors:
+                    if isinstance(comp, dict) and feature in comp.get("features", []):
+                        comparison["by_category"][category][feature].append(comp["name"])
+        # Build comparison by competitor
+        for comp in competitors:
+            if isinstance(comp, dict):
+                comparison["by_competitor"][comp["name"]] = {}
+                for category, features in categorized_features.items():
+                    comparison["by_competitor"][comp["name"]][category] = []
+                    for feature in features:
+                        if feature in comp.get("features", []):
+                            comparison["by_competitor"][comp["name"]][category].append(feature)
+    except Exception as e:
+        st.warning(f"Error generating feature comparison: {str(e)}")
+    return comparison
 
 class FeatureMatrixBuilderAgent:
-    """Agent responsible for building and analyzing feature matrices."""
-    
+    """Agent responsible for building and analyzing feature matrices using LangChain agentic pattern."""
     def __init__(self, llm: ChatGoogleGenerativeAI):
         self.llm = llm
-        self.feature_categories = [
-            "Core Features",
-            "User Experience",
-            "Technical Capabilities",
-            "Integration Features",
-            "Security & Privacy",
-            "Analytics & Reporting",
-            "Mobile & Remote Access"
+        self.tools = [
+            categorize_features_tool.bind(llm=llm),
+            generate_feature_comparison_tool.bind(llm=llm)
         ]
-    
+        self.agent = initialize_agent(
+            self.tools,
+            llm,
+            agent=AgentType.OPENAI_FUNCTIONS,
+            verbose=True,
+            handle_parsing_errors=True
+        )
+
     def build_feature_matrix(self, competitors: List[Dict]) -> Dict:
-        """Build a comprehensive feature matrix from competitor data."""
+        """Build a comprehensive feature matrix from competitor data using the agent."""
         matrix = {
             "features": {},
             "pricing_comparison": {},
             "audience_segments": {},
             "usps": {}
         }
-        
         try:
-            # Extract and categorize features
+            # Extract all features and metadata
             all_features = set()
             for comp in competitors:
                 if isinstance(comp, dict):
                     features = comp.get("features", [])
                     all_features.update(features)
-                    
-                    # Add to pricing comparison
                     matrix["pricing_comparison"][comp["name"]] = comp.get("pricing_model", "N/A")
-                    
-                    # Add to audience segments
                     matrix["audience_segments"][comp["name"]] = comp.get("target_audience", "N/A")
-                    
-                    # Add to USPs
                     matrix["usps"][comp["name"]] = comp.get("usp", "N/A")
-            
-            # Categorize features
-            categorized_features = self._categorize_features(list(all_features))
+            # Use agent to categorize features
+            categorized_features = self.agent.run({"features": list(all_features)}, tool_name="categorize_features")
+            if isinstance(categorized_features, str):
+                categorized_features = json.loads(categorized_features)
             matrix["features"] = categorized_features
-            
-            # Generate feature comparison
-            matrix["feature_comparison"] = self._generate_feature_comparison(competitors, categorized_features)
-            
+            # Use agent to generate feature comparison
+            feature_comparison = self.agent.run({
+                "competitors": competitors,
+                "categorized_features": categorized_features
+            }, tool_name="generate_feature_comparison")
+            if isinstance(feature_comparison, str):
+                feature_comparison = json.loads(feature_comparison)
+            matrix["feature_comparison"] = feature_comparison
             return matrix
         except Exception as e:
             st.error(f"Error building feature matrix: {str(e)}")
             return matrix
-    
-    def _categorize_features(self, features: List[str]) -> Dict[str, List[str]]:
-        """Categorize features into predefined categories."""
-        categorized = {category: [] for category in self.feature_categories}
-        
-        prompt = f"""Categorize the following features into these categories: {', '.join(self.feature_categories)}
 
-Features to categorize:
-{json.dumps(features, indent=2)}
-
-Return the response in JSON format with categories as keys and lists of features as values."""
-        
-        try:
-            response = self.llm.invoke(prompt)
-            response_text = response.content
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}') + 1
-            if start_idx != -1 and end_idx != -1:
-                categories = json.loads(response_text[start_idx:end_idx])
-                for category, features in categories.items():
-                    if category in categorized:
-                        categorized[category] = features
-        except Exception as e:
-            st.warning(f"Error categorizing features: {str(e)}")
-        
-        return categorized
-    
-    def _generate_feature_comparison(self, competitors: List[Dict], categorized_features: Dict[str, List[str]]) -> Dict:
-        """Generate a detailed feature comparison matrix."""
-        comparison = {
-            "by_category": {},
-            "by_competitor": {}
-        }
-        
-        try:
-            # Build comparison by category
-            for category, features in categorized_features.items():
-                comparison["by_category"][category] = {}
-                for feature in features:
-                    comparison["by_category"][category][feature] = []
-                    for comp in competitors:
-                        if isinstance(comp, dict) and feature in comp.get("features", []):
-                            comparison["by_category"][category][feature].append(comp["name"])
-            
-            # Build comparison by competitor
-            for comp in competitors:
-                if isinstance(comp, dict):
-                    comparison["by_competitor"][comp["name"]] = {}
-                    for category, features in categorized_features.items():
-                        comparison["by_competitor"][comp["name"]][category] = []
-                        for feature in features:
-                            if feature in comp.get("features", []):
-                                comparison["by_competitor"][comp["name"]][category].append(feature)
-        except Exception as e:
-            st.warning(f"Error generating feature comparison: {str(e)}")
-        
-        return comparison
-    
     def generate_visualization_data(self, matrix: Dict) -> Dict:
         """Generate data for visualization of the feature matrix."""
         viz_data = {
@@ -121,7 +135,6 @@ Return the response in JSON format with categories as keys and lists of features
             "pricing_comparison": [],
             "audience_overlap": []
         }
-        
         try:
             # Generate feature heatmap data
             for category, features in matrix["features"].items():
@@ -134,7 +147,6 @@ Return the response in JSON format with categories as keys and lists of features
                             "competitor": comp_name,
                             "has_feature": has_feature
                         })
-            
             # Generate category comparison data
             for comp_name, categories in matrix["feature_comparison"]["by_competitor"].items():
                 for category, features in categories.items():
@@ -143,7 +155,6 @@ Return the response in JSON format with categories as keys and lists of features
                         "category": category,
                         "feature_count": len(features)
                     })
-            
             # Generate pricing comparison data
             for comp_name, pricing in matrix["pricing_comparison"].items():
                 viz_data["pricing_comparison"].append({
@@ -152,5 +163,4 @@ Return the response in JSON format with categories as keys and lists of features
                 })
         except Exception as e:
             st.warning(f"Error generating visualization data: {str(e)}")
-        
         return viz_data 

@@ -6,8 +6,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_tavily import TavilySearch
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+import json
 
-from agents.competitor_discovery_agent import CompetitorDiscoveryAgent
+from agents.competitor_discovery_agent import run_competitor_discovery_agent
 from agents.feature_matrix_builder_agent import FeatureMatrixBuilderAgent
 from agents.differentiation_strategist_agent import DifferentiationStrategistAgent
 from agents.visual_gap_mapper_agent import VisualGapMapperAgent
@@ -28,17 +29,23 @@ def create_market_analysis_graph(
 ) -> Graph:
     """Create the market analysis workflow graph."""
     
-    # Initialize agents
-    competitor_discovery = CompetitorDiscoveryAgent(search, llm, vector_db)
+    # Initialize agents (except competitor discovery, now a function)
     feature_matrix_builder = FeatureMatrixBuilderAgent(llm)
     differentiation_strategist = DifferentiationStrategistAgent(llm)
-    visual_gap_mapper = VisualGapMapperAgent()
+    visual_gap_mapper = VisualGapMapperAgent(llm)
     
     # Define the nodes
     def discover_competitors(state: MarketAnalysisState) -> MarketAnalysisState:
         try:
-            competitors = competitor_discovery.discover_competitors(state["startup_idea"])
-            return {**state, "competitors": competitors}
+            competitors = run_competitor_discovery_agent(state["startup_idea"], search, llm, vector_db)
+            if isinstance(competitors, list) and all(isinstance(item, dict) for item in competitors):
+                return {**state, "competitors": competitors}
+            # If response is a dict (single competitor), wrap in list
+            elif isinstance(competitors, dict):
+                return {**state, "competitors": [competitors]}
+            # If response is not a list/dict, return empty list or raise error
+            else:
+                return {**state, "error": "Invalid format for competitors"}
         except Exception as e:
             return {**state, "error": f"Error discovering competitors: {str(e)}"}
     
@@ -62,10 +69,11 @@ def create_market_analysis_graph(
     
     def create_visualizations(state: MarketAnalysisState) -> MarketAnalysisState:
         try:
-            visualizations = visual_gap_mapper.generate_visualizations(
-                state["competitors"],
-                state["feature_matrix"],
-                state["strategy"]
+            visualizations = visual_gap_mapper.generate_visualization(
+                user_query="Generate all visualizations",
+                competitors=state["competitors"],
+                feature_matrix=state["feature_matrix"],
+                strategy=state["strategy"]
             )
             return {**state, "visualizations": visualizations}
         except Exception as e:
