@@ -7,7 +7,7 @@ import os
 
 # Load environment variables
 load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Set page configuration
 st.set_page_config(page_title="Logistics Optimizer", layout="wide", page_icon="🚚")
